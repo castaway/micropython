@@ -35,6 +35,8 @@
 #include "netutils.h"
 #include "modnetwork.h"
 
+#include "lib/fatfs/ff.h"
+
 /******************************************************************************/
 // socket class
 
@@ -222,6 +224,92 @@ STATIC mp_obj_t socket_recv(mp_obj_t self_in, mp_obj_t len_in) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(socket_recv_obj, socket_recv);
 
+#define SAVE_TO_BUFFER_SIZE 512
+
+STATIC mp_obj_t socket_save_to(mp_obj_t self_in, mp_obj_t arg_target) {
+    mp_uint_t targetLen;
+    const char *target = mp_obj_str_get_data(arg_target, &targetLen);
+    printf("saving to: %s\n", target);
+
+    mod_network_socket_obj_t *self = self_in;
+    if (self->nic == MP_OBJ_NULL) {
+        // not connected
+        nlr_raise(mp_obj_new_exception_arg1(&mp_type_OSError, MP_OBJ_NEW_SMALL_INT(MP_ENOTCONN)));
+    }
+
+    // open file handler
+    FIL fp = {};
+    printf("open file for writing: %s\n", target);
+    byte res = f_open(&fp, target, FA_WRITE | FA_CREATE_ALWAYS);
+    if (res != 0) {
+        printf("Can't open file %s to write, error code: %d\n", target, res);
+        nlr_raise(mp_obj_new_exception_arg1(&mp_type_OSError, MP_OBJ_NEW_SMALL_INT(1))); // ToDo: Correct error code
+    }
+
+    // receive and write
+    byte buf[SAVE_TO_BUFFER_SIZE + 1];
+    mp_int_t total = 0;
+    while (true) {
+        // receive
+        printf("next round\n");
+
+        if (self->nic == MP_OBJ_NULL) {
+            printf("closed\n");
+            // ToDo: This is a silly way to detect the end of a HTTP payload, use ContentLength instead
+            break;
+        }
+
+        int _errno;
+        mp_uint_t bufferSize = self->nic_type->recv(self, (byte*)buf, SAVE_TO_BUFFER_SIZE, &_errno); // This seems to sometimes block on sl_SyncObjWait
+        printf("ok?\n");
+        if (bufferSize == -1) {
+            printf("bufferSize = -1\n");
+            nlr_raise(mp_obj_new_exception_arg1(&mp_type_OSError, MP_OBJ_NEW_SMALL_INT(_errno)));
+        }
+        if (bufferSize == 0) {
+            printf("bufferSize=0\n");
+            // ToDo: This is a silly way to detect the end of a HTTP payload, use ContentLength instead
+            break;
+        }
+
+        total += bufferSize;
+
+        printf("received chunk of %d bytes, total %d\n", bufferSize, total);
+
+        // ToDo: Skip headers, read ContentLength
+
+        // write
+        uint sz_out;
+        res = f_write(&fp, buf, bufferSize, &sz_out);
+        if (res != 0) {
+            printf("Can't write to file %s, error code: %d\n", target, res);
+            nlr_raise(mp_obj_new_exception_arg1(&mp_type_OSError, MP_OBJ_NEW_SMALL_INT(1))); // ToDo: Correct error code
+        }
+
+        if (sz_out != bufferSize) {
+            // The FatFS documentation says that this means disk full.
+            printf("Can't write to file %s, disk full\n", target);
+            nlr_raise(mp_obj_new_exception_arg1(&mp_type_OSError, MP_OBJ_NEW_SMALL_INT(1))); // ToDo: Correct error code
+        }
+
+        printf("wrote chunk\n");
+
+        //mp_hal_delay_ms(10);
+        //break;
+
+    }
+
+    // socket: close
+    // ToDo
+
+    // file: close and flush
+    f_close(&fp);
+    f_sync(&fp);
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(socket_save_to_obj, socket_save_to);
+
 // method socket.sendto(bytes, address)
 STATIC mp_obj_t socket_sendto(mp_obj_t self_in, mp_obj_t data_in, mp_obj_t addr_in) {
     mod_network_socket_obj_t *self = self_in;
@@ -353,6 +441,7 @@ STATIC const mp_map_elem_t socket_locals_dict_table[] = {
     { MP_OBJ_NEW_QSTR(MP_QSTR_connect), (mp_obj_t)&socket_connect_obj },
     { MP_OBJ_NEW_QSTR(MP_QSTR_send), (mp_obj_t)&socket_send_obj },
     { MP_OBJ_NEW_QSTR(MP_QSTR_recv), (mp_obj_t)&socket_recv_obj },
+    { MP_OBJ_NEW_QSTR(MP_QSTR_save_to), (mp_obj_t)&socket_save_to_obj },
     { MP_OBJ_NEW_QSTR(MP_QSTR_sendto), (mp_obj_t)&socket_sendto_obj },
     { MP_OBJ_NEW_QSTR(MP_QSTR_recvfrom), (mp_obj_t)&socket_recvfrom_obj },
     { MP_OBJ_NEW_QSTR(MP_QSTR_setsockopt), (mp_obj_t)&socket_setsockopt_obj },
