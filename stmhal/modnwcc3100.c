@@ -106,6 +106,17 @@ int spi_Close(Fd_t Fd)
     return 0;
 }
 
+#if 1
+void debugSpi(unsigned char* pBuff, int Len)
+{
+  for (int i=0; i < Len; ++i){
+    printf("%x ",*(pBuff+i));
+  }
+  printf("\n");
+}
+#else
+#define debugSpi(x,y)
+#endif
 int spi_Read(Fd_t Fd, unsigned char* pBuff, int Len)
 {
     int retval;
@@ -117,11 +128,14 @@ int spi_Read(Fd_t Fd, unsigned char* pBuff, int Len)
     extint_enable(PIN_IRQ->pin);
     if(retval < 0)
       return(0);
-      
+    printf("spi_Read: ");
+    debugSpi(pBuff, Len);  
     return Len;
 }
 
 int spi_Write(Fd_t Fd, unsigned char* pBuff, int Len){
+    printf("spi_Write: ");
+    debugSpi(pBuff, Len); 
     extint_disable(PIN_IRQ->pin);
     GPIO_clear_pin(PIN_CS->gpio, PIN_CS->pin_mask);
     HAL_SPI_Transmit(SPI_HANDLE, pBuff, Len, 20);
@@ -157,7 +171,9 @@ void NwpPowerOff(void){
 }
 
 STATIC mp_obj_t cc3100_callback(mp_obj_t line) {
+    printf("cc3100 callback\n");
     if (cc3100_IrqHandler != 0) {
+        printf("Call handler\n");
         (cc3100_IrqHandler)(line);
     }
     return mp_const_none;
@@ -177,10 +193,12 @@ int NwpRegisterInterruptHandler(SL_P_EVENT_HANDLER InterruptHdl, void* pValue){
 }
 
 void NwpMaskInterrupt(){
+    printf("Mask Interupt\n");
     extint_disable(PIN_IRQ->pin);
 }
 
 void NwpUnMaskInterrupt(){
+    printf("De-Mask Interupt\n");
     extint_enable(PIN_IRQ->pin);
 }
 
@@ -379,10 +397,30 @@ STATIC mp_obj_t cc3100_make_new(const mp_obj_type_t *type, mp_uint_t n_args, mp_
        PIN_EN = pin_find(args[2]);
        PIN_IRQ = pin_find(args[3]);
     }
-
+    _u8 pConfigOpt;
+    _u8 pConfigLen;
+    SlVersionFull ver;
 
     mode = sl_Start(NULL,NULL,NULL);
+    printf("Info: sl_Start returned: %d\n",mode);
 
+    pConfigLen = sizeof(ver);
+    pConfigOpt = SL_DEVICE_GENERAL_VERSION;
+ 
+    retVal = sl_DevGet(SL_DEVICE_GENERAL_CONFIGURATION, &pConfigOpt, &pConfigLen, (_u8 *)(&ver));
+ 
+    if (retVal >= 0) {
+      printf("CHIP %d\nMAC 31.%d.%d.%d.%d\nPHY %d.%d.%d.%d\nNWP %d.%d.%d.%d\nROM %d\nHOST %d.%d.%d.%d\n",
+                                                                ver.ChipFwAndPhyVersion.ChipId,
+                                                                ver.ChipFwAndPhyVersion.FwVersion[0],ver.ChipFwAndPhyVersion.FwVersion[1],
+                                                                ver.ChipFwAndPhyVersion.FwVersion[2],ver.ChipFwAndPhyVersion.FwVersion[3],
+                                                                ver.ChipFwAndPhyVersion.PhyVersion[0],ver.ChipFwAndPhyVersion.PhyVersion[1],
+                                                                ver.ChipFwAndPhyVersion.PhyVersion[2],ver.ChipFwAndPhyVersion.PhyVersion[3],
+                                                                ver.NwpVersion[0],ver.NwpVersion[1],ver.NwpVersion[2],ver.NwpVersion[3],
+                                                                ver.RomVersion,
+                                                                SL_MAJOR_VERSION_NUM,SL_MINOR_VERSION_NUM,SL_VERSION_NUM,SL_SUB_VERSION_NUM);
+                                }
+    
     if(ROLE_STA != mode)
     {   // Configure the device into station mode
         if(ROLE_AP == mode)
@@ -416,7 +454,7 @@ STATIC mp_obj_t cc3100_make_new(const mp_obj_type_t *type, mp_uint_t n_args, mp_
 
     /* Remove all profiles */
     LOG_INFO("Remove all profiles");
-    retVal = sl_WlanProfileDel(0xFF);
+    retVal = sl_WlanProfileDel(0xFF); 
     LOG_COND_RET(retVal>=0, -1);
 
     /*
