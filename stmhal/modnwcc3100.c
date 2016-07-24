@@ -106,15 +106,29 @@ int spi_Close(Fd_t Fd)
     return 0;
 }
 
+#if 1
+void debugSpi(unsigned char* pBuff, int Len)
+{
+  for (int i=0; i < Len; ++i){
+    printf("%x ",*(pBuff+i));
+  }
+  printf("\n");
+}
+#else
+#define debugSpi(x,y)
+#endif
+
+
 int spi_Read(Fd_t Fd, unsigned char* pBuff, int Len)
 {
     HAL_StatusTypeDef status;
     memset(pBuff, 0xFF, Len);
     extint_disable(PIN_IRQ->pin);
     GPIO_clear_pin(PIN_CS->gpio, PIN_CS->pin_mask);
-    status = HAL_SPI_Receive(SPI_HANDLE, pBuff, Len, 20);
+    status = HAL_SPI_Receive(SPI_HANDLE, pBuff, Len, 0x1000);
     GPIO_set_pin(PIN_CS->gpio, PIN_CS->pin_mask);
     extint_enable(PIN_IRQ->pin);
+    debugSpi(pBuff, Len);
     if(status != HAL_OK)
       return(0);
       
@@ -123,10 +137,13 @@ int spi_Read(Fd_t Fd, unsigned char* pBuff, int Len)
 
 int spi_Write(Fd_t Fd, unsigned char* pBuff, int Len)
 {
+    unsigned char* dummy;
+    dummy = malloc(sizeof(unsigned char)*Len);
+    debugSpi(pBuff, Len);
     HAL_StatusTypeDef status;
     extint_disable(PIN_IRQ->pin);
     GPIO_clear_pin(PIN_CS->gpio, PIN_CS->pin_mask);
-    status = HAL_SPI_Transmit(SPI_HANDLE, pBuff, Len, 20);
+    status = HAL_SPI_TransmitReceive(SPI_HANDLE, pBuff, dummy, Len, 0x1000);
     GPIO_set_pin(PIN_CS->gpio, PIN_CS->pin_mask);
     extint_enable(PIN_IRQ->pin);
     if(status != HAL_OK)
